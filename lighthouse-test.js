@@ -1,9 +1,45 @@
 const fs = require('fs');
 const { spawn } = require('child_process');
+const puppeteer = require('puppeteer');
 
 const BASE_URL = 'http://localhost:3000';
 
-function runLighthouse(url, pageName) {
+async function loginAndGetCookie() {
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+
+    const page = await browser.newPage();
+
+    // Navigate to login page
+    await page.goto(`${BASE_URL}/login`, { waitUntil: 'networkidle2' });
+
+    // Fill in login form
+    await page.type('#username', 'user');
+    await page.type('#password', 'password');
+
+    // Submit form
+    await page.click('button[type="submit"]');
+
+    // Wait for redirect to dashboard
+    await page.waitForNavigation({ waitUntil: 'networkidle2' });
+
+    // Get cookies
+    const cookies = await page.cookies();
+    console.log('✅ Login successful via Puppeteer');
+
+    await browser.close();
+    return cookies;
+  } catch (error) {
+    if (browser) await browser.close();
+    throw new Error(`Login failed: ${error.message}`);
+  }
+}
+
+function runLighthouse(url, pageName, cookies = null) {
   return new Promise((resolve, reject) => {
     console.log(`\n🔍 Testing ${pageName} at ${url}...`);
 
@@ -71,6 +107,16 @@ async function runAllTests() {
     results.push(dashboardResult);
   } catch (error) {
     console.error('❌ Dashboard page error:', error.message);
+  }
+
+  // Test authenticated dashboard after login
+  try {
+    console.log('\n🔐 Logging in for authenticated dashboard test...');
+    const cookies = await loginAndGetCookie();
+    const authDashboardResult = await runLighthouse(`${BASE_URL}/dashboard`, 'Dashboard (authenticated)');
+    results.push(authDashboardResult);
+  } catch (error) {
+    console.error('❌ Authenticated dashboard error:', error.message);
   }
 
   // Save results to file
